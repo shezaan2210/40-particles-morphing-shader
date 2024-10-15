@@ -92,9 +92,48 @@ gltfLoader.load('./models.glb', (gltf)=>{
  */
  particles = {}
 
+//  positions
+const positions = gltf.scene.children.map((child)=>{
+    return child.geometry.attributes.position
+})
+
+particles.maxCount = 0
+for(const position of positions){
+    if(position.count > particles.maxCount){
+        particles.maxCount = position.count
+    }
+}
+
+particles.position = []
+for(const position of positions){
+    const originalArray = position.array
+    const newArray = new Float32Array(particles.maxCount * 3)
+
+    for(let i = 0; i < particles.maxCount; i++){
+
+        const i3 = i * 3
+
+        if(i < originalArray.length){
+           newArray[i3 + 0] = originalArray[i3 + 0]
+           newArray[i3 + 1] = originalArray[i3 + 1]
+           newArray[i3 + 2] = originalArray[i3 + 2]
+        }
+        else{
+            const randomIndex = Math.floor(position.count * Math.random()) * 3
+            newArray[i3 + 0] = originalArray[randomIndex = 0]
+            newArray[i3 + 1] = originalArray[randomIndex = 1]
+            newArray[i3 + 2] = originalArray[randomIndex = 2]
+        }
+    }
+
+    particles.position.push(new THREE.Float32BufferAttribute(newArray, 3))
+}
+
 // Geometry
-particles.geometry = new THREE.SphereGeometry(3)
-particles.geometry.setIndex(null)
+particles.geometry = new THREE.BufferGeometry()
+particles.geometry.setAttribute('position', particles.position[1])
+particles.geometry.setAttribute('aPositionTarget', particles.position[0])
+// particles.geometry.setIndex(null)
 
 // Material
 particles.material = new THREE.ShaderMaterial({
@@ -102,8 +141,9 @@ particles.material = new THREE.ShaderMaterial({
     fragmentShader: particlesFragmentShader,
     uniforms:
     {
-        uSize: new THREE.Uniform(0.4),
-        uResolution: new THREE.Uniform(new THREE.Vector2(sizes.width * sizes.pixelRatio, sizes.height * sizes.pixelRatio))
+        uSize: new THREE.Uniform(0.2),
+        uResolution: new THREE.Uniform(new THREE.Vector2(sizes.width * sizes.pixelRatio, sizes.height * sizes.pixelRatio)),
+        uProgress: new THREE.Uniform(0)
     },
     blending: THREE.AdditiveBlending,
     depthWrite: false,
@@ -112,6 +152,8 @@ particles.material = new THREE.ShaderMaterial({
 // Points
 particles.points = new THREE.Points(particles.geometry, particles.material)
 scene.add(particles.points)
+
+gui.add(particles.material.uniforms.uProgress, 'value').min(0).max(1).step(0.001).name('uProgress')
 
 })
 
