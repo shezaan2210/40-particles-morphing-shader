@@ -85,77 +85,116 @@ renderer.setClearColor(debugObject.clearColor)
 
 
 // Load models
-let particles = null
-gltfLoader.load('./models.glb', (gltf)=>{
-/**
- * Particles
- */
- particles = {}
-
-//  positions
-const positions = gltf.scene.children.map((child)=>{
-    return child.geometry.attributes.position
-})
-
-particles.maxCount = 0
-for(const position of positions){
-    if(position.count > particles.maxCount){
-        particles.maxCount = position.count
-    }
-}
-
-particles.position = []
-for(const position of positions){
-    const originalArray = position.array
-    const newArray = new Float32Array(particles.maxCount * 3)
-
-    for(let i = 0; i < particles.maxCount; i++){
-
-        const i3 = i * 3
-
-        if(i < originalArray.length){
-           newArray[i3 + 0] = originalArray[i3 + 0]
-           newArray[i3 + 1] = originalArray[i3 + 1]
-           newArray[i3 + 2] = originalArray[i3 + 2]
+// Load models and setup particles
+let particles = null;
+gltfLoader.load('./models.glb', (gltf) => {
+    particles = {};
+    particles.index = 0
+    
+    // Extract all positions from the loaded models
+    const positions = gltf.scene.children.map((child) => child.geometry.attributes.position);
+    
+    // Find the maximum vertex count across all models
+    particles.maxCount = Math.max(...positions.map(position => position.count));
+    
+    // Prepare an array to store each model's positions with padding
+    particles.position = positions.map((position) => {
+        const originalArray = position.array;
+        const paddedArray = new Float32Array(particles.maxCount * 3);
+        
+        // Copy existing vertices into the padded array
+        for (let i = 0; i < particles.maxCount; i++) {
+            const i3 = i * 3;
+            if (i < position.count) {
+                paddedArray[i3 + 0] = originalArray[i3 + 0];
+                paddedArray[i3 + 1] = originalArray[i3 + 1];
+                paddedArray[i3 + 2] = originalArray[i3 + 2];
+            } else {
+                // If beyond original length, repeat a random vertex
+                const randomIndex = Math.floor(Math.random() * position.count) * 3;
+                paddedArray[i3 + 0] = originalArray[randomIndex + 0];
+                paddedArray[i3 + 1] = originalArray[randomIndex + 1];
+                paddedArray[i3 + 2] = originalArray[randomIndex + 2];
+            }
         }
-        else{
-            const randomIndex = Math.floor(position.count * Math.random()) * 3
-            newArray[i3 + 0] = originalArray[randomIndex = 0]
-            newArray[i3 + 1] = originalArray[randomIndex = 1]
-            newArray[i3 + 2] = originalArray[randomIndex = 2]
-        }
+        return new THREE.Float32BufferAttribute(paddedArray, 3);
+    });
+    
+    // Setup the geometry with initial and target positions
+    const sizesArray = new Float32Array(particles.maxCount)
+
+    for(let i = 0; i < particles.maxCount; i++)
+        sizesArray[i] = Math.random()
+
+    particles.geometry = new THREE.BufferGeometry();
+    particles.geometry.setAttribute('position', particles.position[particles.index]); // Initial position
+    particles.geometry.setAttribute('aPositionTarget', particles.position[1]); // Target position for morphing
+    particles.geometry.setAttribute('aSize', new THREE.BufferAttribute(sizesArray, 1)); 
+
+
+    // Material setup
+    particles.colorA = '#ff7300'
+    particles.colorB = '#0091ff'
+    particles.material = new THREE.ShaderMaterial({
+        vertexShader: particlesVertexShader,
+        fragmentShader: particlesFragmentShader,
+        uniforms: {
+            uSize: new THREE.Uniform(0.4),
+            uResolution: new THREE.Uniform(new THREE.Vector2(sizes.width * sizes.pixelRatio, sizes.height * sizes.pixelRatio)),
+            uProgress: new THREE.Uniform(0),
+            uColorA: new THREE.Uniform(new THREE.Color(particles.colorA)),
+            uColorB: new THREE.Uniform(new THREE.Color(particles.colorB))
+        },
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+
+    // Points setup
+    particles.points = new THREE.Points(particles.geometry, particles.material);
+    particles.points.frustumCulled = false
+    scene.add(particles.points);
+
+    // methods
+    particles.morph = (index)=>{
+
+        // update attributes
+        particles.geometry.attributes.position = particles.position[particles.index]
+        particles.geometry.attributes.aPositionTarget = particles.position[index]
+
+        // animate uProgress
+        gsap.fromTo(particles.material.uniforms.uProgress, 
+            {value: 0},
+            {value: 1, duration: 3, ease: 'power4.inOut'}
+        )
+
+        // save index
+        particles.index = index
     }
 
-    particles.position.push(new THREE.Float32BufferAttribute(newArray, 3))
-}
+    gui.addColor(particles, 'colorA').onChange(()=>{
+        particles.material.uniforms.uColorA.value.set(particles.colorA)
+    })
 
-// Geometry
-particles.geometry = new THREE.BufferGeometry()
-particles.geometry.setAttribute('position', particles.position[1])
-particles.geometry.setAttribute('aPositionTarget', particles.position[0])
-// particles.geometry.setIndex(null)
+    gui.addColor(particles, 'colorB').onChange(()=>{
+        particles.material.uniforms.uColorB.value.set(particles.colorB)
+    })
 
-// Material
-particles.material = new THREE.ShaderMaterial({
-    vertexShader: particlesVertexShader,
-    fragmentShader: particlesFragmentShader,
-    uniforms:
-    {
-        uSize: new THREE.Uniform(0.2),
-        uResolution: new THREE.Uniform(new THREE.Vector2(sizes.width * sizes.pixelRatio, sizes.height * sizes.pixelRatio)),
-        uProgress: new THREE.Uniform(0)
-    },
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-})
+    particles.morph0 = ()=>{ particles.morph(0) }
+    particles.morph1 = ()=>{ particles.morph(1) }
+    particles.morph2 = ()=>{ particles.morph(2) }
+    particles.morph3 = ()=>{ particles.morph(3) }
 
-// Points
-particles.points = new THREE.Points(particles.geometry, particles.material)
-scene.add(particles.points)
+    // Debug UI for morphing
+    gui.add(particles.material.uniforms.uProgress, 'value').min(0).max(1).step(0.001).name('uProgress').listen()
 
-gui.add(particles.material.uniforms.uProgress, 'value').min(0).max(1).step(0.001).name('uProgress')
+    gui.add(particles, 'morph0')
+    gui.add(particles, 'morph1')
+    gui.add(particles, 'morph2')
+    gui.add(particles, 'morph3')
 
-})
+
+});
+
 
 /**
  * Animate
